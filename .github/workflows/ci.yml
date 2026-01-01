@@ -1,0 +1,88 @@
+name: Data Pipeline CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_DB: ecommerce_db_test
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U test_user -d ecommerce_db_test"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_NAME: ecommerce_db_test
+      DB_USER: test_user
+      DB_PASSWORD: test_password
+      PGPASSWORD: test_password
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Wait for DB
+        run: |
+          for i in {1..10}; do
+            pg_isready -h localhost -p 5432 -U test_user && break
+            sleep 3
+          done
+
+      - name: Create database schemas
+        run: |
+          psql -h localhost -U test_user -d ecommerce_db_test -f sql/ddl/create_staging_schema.sql
+          psql -h localhost -U test_user -d ecommerce_db_test -f sql/ddl/create_production_schema.sql
+          psql -h localhost -U test_user -d ecommerce_db_test -f sql/ddl/create_warehouse_schema.sql
+        env:
+          PGPASSWORD: test_password
+
+
+      # 🔥 THESE STEPS WERE MISSING BEFORE 🔥
+      - name: Generate data
+        run: python scripts/data_generation/generate_data.py
+
+      - name: Ingest to staging
+        run: python scripts/ingestion/ingest_to_staging.py
+
+      - name: Transform to production
+        run: python scripts/transformation/staging_to_production.py
+
+      - name: Load warehouse
+        run: python scripts/transformation/load_warehouse.py
+
+      # ✅ NOW tests will pass
+      - name: Run tests with coverage
+        run: pytest
+
+      - name: Debug DB row counts
+        run: |
+          psql -h localhost -U test_user -d ecommerce_db_test -c "SELECT COUNT(*) FROM staging.customers;"
+          psql -h localhost -U test_user -d ecommerce_db_test -c "SELECT COUNT(*) FROM production.customers;"
+          psql -h localhost -U test_user -d ecommerce_db_test -c "SELECT COUNT(*) FROM warehouse.fact_sales;"
