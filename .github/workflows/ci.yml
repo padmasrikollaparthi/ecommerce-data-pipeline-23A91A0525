@@ -64,7 +64,7 @@ jobs:
           PGPASSWORD: test_password
 
 
-      # 🔥 THESE STEPS WERE MISSING BEFORE 🔥
+      # THESE STEPS WERE MISSING BEFORE 
       - name: Generate data
         run: python scripts/data_generation/generate_data.py
 
@@ -77,7 +77,7 @@ jobs:
       - name: Load warehouse
         run: python scripts/transformation/load_warehouse.py
 
-      # ✅ NOW tests will pass
+      # NOW tests will pass
       - name: Run tests with coverage
         run: pytest
 
